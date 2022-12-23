@@ -4,10 +4,15 @@ import { writeFile } from '@sanjo/write-file'
 import * as child_process from 'child_process'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import { glob } from 'glob-promise'
 
-const addOnPath = process.argv[2]
-const dependenciesWhichCanBeEmbedded = determineDependenciesWhichCanBeEmbedded(addOnPath)
-await embedDependencies(addOnPath, dependenciesWhichCanBeEmbedded)
+async function main() {
+  const addOnPath = process.argv[2]
+  const dependenciesWhichCanBeEmbedded = determineDependenciesWhichCanBeEmbedded(addOnPath)
+  await embedDependencies(addOnPath, dependenciesWhichCanBeEmbedded)
+}
+
+const libraryFolderName = 'libs'
 
 async function embedDependencies(addOnPath, dependenciesToEmbed) {
   if (dependenciesToEmbed.length >= 1) {
@@ -27,7 +32,7 @@ async function embedDependencies(addOnPath, dependenciesToEmbed) {
     const gitModulesLookup = new Map(gitModules.map(({ path, url }) => [path, url]))
 
     process.chdir(addOnPath)
-    await fs.mkdir('libs') // TODO: Might require try catch when directory already exists.
+    await fs.mkdir(libraryFolderName) // TODO: Might require try catch when directory already exists.
     const relativeAddOnPath = path.relative(repositoryRootPath, addOnPath) // TODO: Does this generate the correct thing?
     const gitRepositoryUrl = gitModulesLookup.get(relativeAddOnPath)
     if (gitRepositoryUrl) {
@@ -37,9 +42,8 @@ async function embedDependencies(addOnPath, dependenciesToEmbed) {
       }
       child_process.execSync('git submodule update --init --recursive')
       addRetrieveLibraryStatements(addOnPath)
-      const addOnName = determineAddOnName(addOnPath)
-      addLibraryLoadingToLuaFiles(addOnName)
-      removeDependencies()
+      addLibraryLoadingToLuaFiles(addOnPath)
+      await removeDependencies(addOnPath, dependenciesToEmbed)
     } else {
       throw new Error(`Couldn't find repository url for "${ relativeAddOnPath }".`)
     }
@@ -60,12 +64,27 @@ function addRetrieveLibraryStatements(addOnPath) {
   }
 }
 
-function addLibraryLoadingToLuaFiles(addOnName) {
-  const libraries = retrieveLibraries()
-  const luaFilePaths = retrieveNonLibraryLuaFilePathsOfAddOn()
+function addLibraryLoadingToLuaFiles(addOnPath) {
+  const libraries = retrieveLibraries(addOnPath)
+  const luaFilePaths = retrieveNonLibraryLuaFilePathsOfAddOn(addOnPath)
+  const addOnName = determineAddOnName(addOnPath)
   for (const luaFilePath of luaFilePaths) {
     addLibraryLoadingToLuaFile(addOnName, luaFilePath, libraries)
   }
+}
+
+function retrieveLibraries(addOnPath) {
+  const files = await fs.readdir(path.join(addOnPath, libraryFolderName), {withFileTypes: true})
+  const libraries = files.filter(file => file.isDirectory()).map(file => file.name)
+  return libraries
+}
+
+function retrieveNonLibraryLuaFilePathsOfAddOn(addOnPath) {
+  const filePaths = await glob('**/*.lua', {
+    cwd: addOnPath,
+    ignore: 'deps/**/*'
+  })
+  return filePaths
 }
 
 function addLibraryLoadingToLuaFile(addOnName, luaFilePath, libraries) {
@@ -115,23 +134,27 @@ function addLibraryLoadingToLuaFile(addOnName, luaFilePath, libraries) {
   lines.splice(addIndex, 0, linesToAdd)
 }
 
-function removeDependencies(dependenciesToRemove) {
+async function removeDependencies(addOnPath, dependenciesToRemove) {
+  const tocFilePaths = await retrieveTOCFilePaths(addOnPath)
+  return await Promise.all(tocFilePaths.map(tocFilePath => await removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove)))
+}
+
+async function removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove) {
   dependenciesToRemove = new Set(dependenciesToRemove)
-  const embeddedLibraries =
-  const content = await readFile(tocFilePath)
   const dependencies = retrieveDependencies(tocFilePath)
   const newDependencies = dependencies.filter(dependency => !dependenciesToRemove.has(dependency))
-  replaceDependencies(newDependencies)
+  await replaceDependencies(tocFilePath, newDependencies)
 }
 
 const dependenciesRegExp = /^## (Dep\w*|RequireDeps): *(.+) *$/m
 
-function replaceDependencies(newDependencies) {
+async function replaceDependencies(tocFilePath, newDependencies) {
   const content = await readFile(tocFilePath)
   const dependenciesList = newDependencies.join(', ')
-  content.replaceAll(dependenciesRegExp, function (_, label) {
+  const newContent = content.replaceAll(dependenciesRegExp, function (_, label) {
     return `## ${ label }: ${ dependenciesList }`
   })
+  await writeFile(tocFilePath, newContent)
 }
 
 function isGlobalDeclarationLine(addOnName, line) {
@@ -252,7 +275,7 @@ async function retrieveDependencies(tocFilePath) {
   return dependencies
 }
 
-function retrieveTOCFilePaths(addOnPath) {
+async function retrieveTOCFilePaths(addOnPath) {
   const tocFilePaths = tocFileNameGenerators.map(tocFileNameGenerator => generateTOCFilePath(
     addOnPath,
     tocFileNameGenerator,
@@ -295,7 +318,7 @@ function determineAddOnName(addOnPath) {
 }
 
 async function isAddOnWhichUseLibraryAddOn(addOnPath) {
-  return await doesFileExists(path.join(addOnPath, 'libs', 'Library'))
+  return await doesFileExists(path.join(addOnPath, libraryFolderName, 'Library'))
 }
 
 async function doesFileExists(filePath) {
@@ -306,3 +329,5 @@ async function doesFileExists(filePath) {
     return false
   }
 }
+
+main()
