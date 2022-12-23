@@ -3,8 +3,21 @@ import { readFile } from '@sanjo/read-file'
 import { writeFile } from '@sanjo/write-file'
 import * as child_process from 'child_process'
 import * as fs from 'fs/promises'
-import * as path from 'path'
 import { glob } from 'glob-promise'
+import * as path from 'path'
+import {
+  createLines,
+  determineAddOnName,
+  doesFileExists,
+  filterAsync,
+  generateTOCFilePath,
+  mergeIncludes,
+  removeDuplicates,
+  replaceIncludes,
+  retrieveIncludes,
+  retrieveTOCFilePaths,
+  tocFileNameGenerators,
+} from './libs/unnamed/packages/lua/index.js'
 
 async function main() {
   const addOnPath = process.argv[2]
@@ -49,14 +62,6 @@ async function embedDependencies(addOnPath, dependenciesToEmbed) {
     }
   }
 }
-
-const tocFileNameGenerators = [
-  generateFallbackTOCFileName,
-  generateMainlineTOCFileName,
-  generateWrathTOCFileName,
-  generateTBCTOCFileName,
-  generateVanillaTOCFileName,
-]
 
 function addRetrieveLibraryStatements(addOnPath) {
   for (const tocFileNameGenerator of tocFileNameGenerators) {
@@ -168,7 +173,7 @@ async function addRetrieveLibraryStatementsToTOCFile(addOnPath, tocFileNameGener
   const dependenciesToEmbed = await determineDependenciesFromTOCFileWhichCanBeEmbedded(addOnPath, tocFilePath)
   const addOnsPath = path.resolve(addOnPath, '..')
   const includesForEmbeds = generateIncludesForEmbeds(tocFilePath, addOnsPath, dependenciesToEmbed)
-  const newIncludes = mergeIncludes([...includesForEmbeds, includes])
+  const newIncludes = mergeIncludes([...includesForEmbeds, ...includes])
   const newContent = replaceIncludes(content, newIncludes)
   await writeFile(tocFilePath, newContent)
 }
@@ -183,59 +188,6 @@ function generateIncludesForEmbeds(tocFilePath, addOnsPath, tocFileNameGenerator
   }
 }
 
-function mergeIncludes(includes) {
-  return removeDuplicates(includes)
-}
-
-function replaceIncludes(content, newIncludes) {
-  let lines = createLines(content)
-  lines = lines.filter(line => !isLoadFileLine(line))
-  if (last(lines).trim() !== '') {
-    lines.push('')
-  }
-  lines = lines.concat(newIncludes)
-
-  const newContent = lines.join('\n')
-  return newContent
-}
-
-function last(array) {
-  return array[array.length - 1]
-}
-
-function retrieveIncludes(content) {
-  return extractListedFiles(content)
-}
-
-function extractListedFiles(tocFileContent) {
-  const lines = createLines(tocFileContent)
-  const loadFileLines = lines.filter(isLoadFileLine)
-  const loadedFiles = loadFileLines.map(line => line.trim())
-  return loadedFiles
-}
-
-function createLines(content) {
-  const lines = content.split(/(?:\n|\r\n|\r)/)
-  return lines
-}
-
-function isLoadFileLine(line) {
-  const trimmedLine = line.trim()
-  return trimmedLine.length >= 1 && !isCommentLine(trimmedLine)
-}
-
-const COMMENT_LINE_REGEXP = /^##/
-
-function isCommentLine(line) {
-  return COMMENT_LINE_REGEXP.test(line)
-}
-
-function generateTOCFilePath(addOnPath, tocFileNameGenerator) {
-  const addOnName = determineAddOnName(addOnPath)
-  const tocFileName = tocFileNameGenerator(addOnName)
-  return path.join(addOnPath, tocFileName)
-}
-
 async function determineDependenciesWhichCanBeEmbedded(addOnPath) {
   const tocFilePaths = retrieveTOCFilePaths(addOnPath)
   const dependencies = removeDuplicates([].concat(...(await Promise.all(tocFilePaths.map(tocFilePath => determineDependenciesFromTOCFileWhichCanBeEmbedded(
@@ -243,15 +195,6 @@ async function determineDependenciesWhichCanBeEmbedded(addOnPath) {
     tocFilePath,
   ))))))
   return dependencies
-}
-
-function removeDuplicates(array) {
-  const alreadyIncluded = new Set()
-  return array.filter(element => {
-    const include = !alreadyIncluded.has(element)
-    alreadyIncluded.add(element)
-    return include
-  })
 }
 
 async function determineDependenciesFromTOCFileWhichCanBeEmbedded(addOnPath, tocFilePath) {
@@ -275,59 +218,8 @@ async function retrieveDependencies(tocFilePath) {
   return dependencies
 }
 
-async function retrieveTOCFilePaths(addOnPath) {
-  const tocFilePaths = tocFileNameGenerators.map(tocFileNameGenerator => generateTOCFilePath(
-    addOnPath,
-    tocFileNameGenerator,
-  ))
-  return await filterAsync(tocFilePaths, doesFileExists)
-}
-
-async function filterAsync(array, predicate) {
-  const result = []
-  for (const entry of array) {
-    if (await predicate(entry)) {
-      result.push(entry)
-    }
-  }
-  return result
-}
-
-function generateFallbackTOCFileName(addOnName) {
-  return `${ addOnName }.toc`
-}
-
-function generateMainlineTOCFileName(addOnName) {
-  return `${ addOnName }_Mainline.toc`
-}
-
-function generateWrathTOCFileName(addOnName) {
-  return `${ addOnName }_Wrath.toc`
-}
-
-function generateTBCTOCFileName(addOnName) {
-  return `${ addOnName }_TBC.toc`
-}
-
-function generateVanillaTOCFileName(addOnName) {
-  return `${ addOnName }_Vanilla.toc`
-}
-
-function determineAddOnName(addOnPath) {
-  return path.basename(addOnPath)
-}
-
 async function isAddOnWhichUseLibraryAddOn(addOnPath) {
   return await doesFileExists(path.join(addOnPath, libraryFolderName, 'Library'))
-}
-
-async function doesFileExists(filePath) {
-  try {
-    await fs.access(filePath)
-    return true
-  } catch (error) {
-    return false
-  }
 }
 
 main()
