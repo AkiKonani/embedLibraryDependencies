@@ -18,6 +18,7 @@ import {
   retrieveTOCFilePaths,
   tocFileNameGenerators,
 } from './libs/unnamed/packages/lua/index.js'
+import { dependenciesRegExp, retrieveDependencies } from './libs/unnames/packages/toc/index.js'
 
 async function main() {
   const addOnPath = process.argv[2]
@@ -151,8 +152,6 @@ async function removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove) {
   await replaceDependencies(tocFilePath, newDependencies)
 }
 
-const dependenciesRegExp = /^## (Dep\w*|RequireDeps): *(.+) *$/m
-
 async function replaceDependencies(tocFilePath, newDependencies) {
   const content = await readFile(tocFilePath)
   const dependenciesList = newDependencies.join(', ')
@@ -209,13 +208,6 @@ async function determineDependenciesFromTOCFileWhichCanBeEmbedded(addOnPath, toc
 async function isDependencyWhichCanBeEmbedded(addOnPath, dependency) {
   const dependencyPath = path.resolve(addOnPath, path.join('..', dependency))
   return await isAddOnWhichUseLibraryAddOn(dependencyPath)
-}
-
-async function retrieveDependencies(tocFilePath) {
-  const content = await readFile(tocFilePath)
-  const match = dependenciesRegExp.exec(content)
-  const dependencies = match ? match[2].split(', ') : []
-  return dependencies
 }
 
 async function isAddOnWhichUseLibraryAddOn(addOnPath) {
