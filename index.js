@@ -141,7 +141,7 @@ function addLibraryLoadingToLuaFile(addOnName, luaFilePath, libraries) {
 
 async function removeDependencies(addOnPath, dependenciesToRemove) {
   const tocFilePaths = await retrieveTOCFilePaths(addOnPath)
-  return await Promise.all(tocFilePaths.map(tocFilePath => await removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove)))
+  return await Promise.all(tocFilePaths.map(tocFilePath => removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove)))
 }
 
 async function removeDependenciesInTOCFile(tocFilePath, dependenciesToRemove) {
